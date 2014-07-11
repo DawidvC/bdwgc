@@ -226,10 +226,12 @@ static GC_bool setup_header(hdr * hhdr, struct hblk *block, size_t byte_sz,
                             int kind, unsigned flags)
 {
     word descr;
-#   ifndef MARK_BIT_PER_OBJ
+#   ifdef MARK_BIT_PER_GRANULE
       size_t granules;
-#   endif
 
+      if (byte_sz > MAXOBJBYTES)
+        flags |= LARGE_BLOCK;
+#   endif
 #   ifdef ENABLE_DISCLAIM
       if (GC_obj_kinds[kind].ok_disclaim_proc)
         flags |= HAS_DISCLAIM;
@@ -267,19 +269,17 @@ static GC_bool setup_header(hdr * hhdr, struct hblk *block, size_t byte_sz,
         hhdr -> hb_inv_sz = inv_sz;
       }
 #   else /* MARK_BIT_PER_GRANULE */
-      hhdr -> hb_large_block = (unsigned char)(byte_sz > MAXOBJBYTES);
       granules = BYTES_TO_GRANULES(byte_sz);
       if (EXPECT(!GC_add_map_entry(granules), FALSE)) {
         /* Make it look like a valid block. */
         hhdr -> hb_sz = HBLKSIZE;
         hhdr -> hb_descr = 0;
-        hhdr -> hb_large_block = TRUE;
+        hhdr -> hb_flags |= LARGE_BLOCK;
         hhdr -> hb_map = 0;
         return FALSE;
-      } else {
-        size_t index = (hhdr -> hb_large_block? 0 : granules);
-        hhdr -> hb_map = GC_obj_map[index];
       }
+      hhdr -> hb_map = GC_obj_map[(hhdr -> hb_flags & LARGE_BLOCK) != 0 ?
+                                    0 : granules];
 #   endif /* MARK_BIT_PER_GRANULE */
 
     /* Clear mark bits */
@@ -640,20 +640,18 @@ STATIC struct hblk *
 GC_allochblk_nth(size_t sz, int kind, unsigned flags, int n, int may_split)
 {
     struct hblk *hbp;
-    hdr * hhdr;         /* Header corr. to hbp */
-                        /* Initialized after loop if hbp !=0    */
-                        /* Gcc uninitialized use warning is bogus.      */
+    hdr * hhdr;                 /* Header corr. to hbp */
     struct hblk *thishbp;
-    hdr * thishdr;              /* Header corr. to hbp */
+    hdr * thishdr;              /* Header corr. to thishbp */
     signed_word size_needed;    /* number of bytes in requested objects */
     signed_word size_avail;     /* bytes available in this block        */
 
     size_needed = HBLKSIZE * OBJ_SZ_TO_BLOCKS(sz);
 
     /* search for a big enough block in free list */
-        hbp = GC_hblkfreelist[n];
-        for(; 0 != hbp; hbp = hhdr -> hb_next) {
-            GET_HDR(hbp, hhdr);
+        for (hbp = GC_hblkfreelist[n];; hbp = hhdr -> hb_next) {
+            if (NULL == hbp) return NULL;
+            GET_HDR(hbp, hhdr); /* set hhdr value */
             size_avail = hhdr->hb_sz;
             if (size_avail < size_needed) continue;
             if (size_avail != size_needed) {

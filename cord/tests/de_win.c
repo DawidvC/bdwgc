@@ -89,7 +89,8 @@ int APIENTRY WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance,
    } else {
         char *p = command_line;
 
-        while (*p != 0 && !isspace(*p)) p++;
+        while (*p != 0 && !isspace(*(unsigned char *)p))
+            p++;
         arg_file_name = CORD_to_char_star(
                             CORD_substr(command_line, 0, p - command_line));
    }
@@ -133,7 +134,7 @@ char * plain_chars(char * text, size_t len)
     register size_t i;
 
     for (i = 0; i < len; i++) {
-       if (iscntrl(text[i])) {
+       if (iscntrl(((unsigned char *)text)[i])) {
            result[i] = ' ';
        } else {
            result[i] = text[i];
@@ -151,7 +152,7 @@ char * control_chars(char * text, size_t len)
     register size_t i;
 
     for (i = 0; i < len; i++) {
-       if (iscntrl(text[i])) {
+       if (iscntrl(((unsigned char *)text)[i])) {
            result[i] = text[i] + 0x40;
        } else {
            result[i] = ' ';
@@ -260,7 +261,8 @@ LRESULT CALLBACK WndProc (HWND hwnd, UINT message,
                unsigned xpos = LOWORD(lParam);  /* From left    */
                unsigned ypos = HIWORD(lParam);  /* from top */
 
-               set_position( xpos/char_width, ypos/char_height );
+               set_position(xpos / (unsigned)char_width,
+                            ypos / (unsigned)char_height);
                return(0);
            }
 

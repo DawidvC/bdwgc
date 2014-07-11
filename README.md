@@ -1,9 +1,12 @@
 # Boehm-Demers-Weiser Garbage Collector
 
-This is version 7.3alpha3 of a conservative garbage collector for C and C++.
+This is version 7.5.0 (next release development) of a conservative garbage
+collector for C and C++.
 
 You might find a more recent version
-[here](http://www.hpl.hp.com/personal/Hans_Boehm/gc).
+[here](http://www.hboehm.info/gc/), or
+[here](https://github.com/ivmai/bdwgc).
+
 
 ## Overview
 
@@ -35,9 +38,6 @@ and
  * Boehm H., "Simple GC-safe Compilation", Proceedings of the ACM SIGPLAN '96
    Conference on Programming Language Design and Implementation.
 
-(Some of these are also available from
-[here](http://www.hpl.hp.com/personal/Hans_Boehm/papers/), among other places.)
-
 Unlike the collector described in the second reference, this collector
 operates either with the mutator stopped during the entire collection
 (default) or incrementally during allocations.  (The latter is supported
@@ -54,8 +54,8 @@ CSL 84-7).  Doug McIlroy wrote a simpler fully conservative collector that
 was part of version 8 UNIX (tm), but appears to not have received
 widespread use.
 
-Rudimentary tools for use of the collector as a leak detector are included
-([link](http://www.hpl.hp.com/personal/Hans_Boehm/gc/leak.html)),
+Rudimentary tools for use of the collector as a
+[leak detector](http://www.hboehm.info/gc/leak.html) are included,
 as is a fairly sophisticated string package "cord" that makes use of the
 collector.  (See doc/README.cords and H.-J. Boehm, R. Atkinson, and M. Plass,
 "Ropes: An Alternative to Strings", Software Practice and Experience 25, 12
@@ -63,7 +63,7 @@ collector.  (See doc/README.cords and H.-J. Boehm, R. Atkinson, and M. Plass,
 in Xerox Cedar, or the "rope" package in the SGI STL or the g++ distribution.)
 
 Further collector documentation can be found
-[here](http://www.hpl.hp.com/personal/Hans_Boehm/gc).
+[here](http://www.hboehm.info/gc/).
 
 
 ## General Description
@@ -149,6 +149,7 @@ ensure that any pointers stored in thread-local storage are also
 stored on the thread's stack for the duration of their lifetime.
 (This is arguably a longstanding bug, but it hasn't been fixed yet.)
 
+
 ## Installation and Portability
 
 As distributed, the collector operates silently
@@ -161,12 +162,25 @@ fragmentation losses.  These are probably much more significant for the
 contrived program "test.c" than for your application.)
 
 On most Unix-like platforms, the collector can be built either using a
-GNU autoconf-based build infrastructure (type `configure; make` in the
+GNU autoconf-based build infrastructure (type `./configure; make` in the
 simplest case), or with a classic makefile by itself (type
-`make -f Makefile.direct`).  Here we focus on the latter option.
-On other platforms, typically only the latter option is available, though
-with a different supplied Makefile.)
+`make -f Makefile.direct`).
 
+Please note that the collector source repository does not contain configure
+and similar auto-generated files, thus the full procedure of autoconf-based
+build of `master` branch of the collector (using `master` branch of
+libatomic_ops source repository as well) could look like:
+
+    git clone git://github.com/ivmai/bdwgc.git
+    cd bdwgc
+    git clone git://github.com/ivmai/libatomic_ops.git
+    autoreconf -vif
+    automake --add-missing
+    ./configure
+    make
+    make check
+
+Below we focus on the collector build using classic makefile.
 For the Makefile.direct-based process, typing `make test` instead of `make`
 will automatically build the collector and then run `setjmp_test` and `gctest`.
 `Setjmp_test` will give you information about configuring the collector, which is
@@ -234,6 +248,7 @@ or win16 is hard.
 
 For machines not already mentioned, or for nonstandard compilers,
 some porting suggestions are provided in doc/porting.html.
+
 
 ## The C Interface to the Allocator
 
@@ -348,6 +363,7 @@ accessing garbage collector routines or variables.
 There are provisions for allocation with explicit type information.
 This is rarely necessary.  Details can be found in gc_typed.h.
 
+
 ## The C++ Interface to the Allocator
 
 The Ellis-Hull C++ interface to the collector is included in
@@ -361,6 +377,7 @@ Very often it will also be necessary to use gc_allocator.h and the
 allocator declared there to construct STL data structures.  Otherwise
 subobjects of STL data structures will be allocated using a system
 allocator, and objects they refer to may be prematurely collected.
+
 
 ## Use as Leak Detector
 
@@ -387,6 +404,7 @@ leak finding mode, `GC_debug_free` actually results in reuse of the object.
 (Otherwise the object is simply marked invalid.)  Also note that the test
 program is not designed to run meaningfully in `FIND_LEAK` mode.
 Use "make gc.a" to build the collector.
+
 
 ## Debugging Facilities
 
@@ -436,6 +454,7 @@ objects with debugging information are really pointers to a displacement
 of 16 bytes form the object beginning, and some translation is necessary
 when finalization routines are invoked.  For details, about what's stored
 in the header, see the definition of the type oh in debug_malloc.c)
+
 
 ## Incremental/Generational Collection
 
@@ -515,9 +534,10 @@ per MB of accessible memory that needs to be scanned and processor.
 Your mileage may vary.)  The incremental/generational collection facility
 may help in some cases.
 
-Please address bug reports [here](mailto:gc@linux.hpl.hp.com).  If you are
-contemplating a major addition, you might also send mail to ask whether
-it's already been done (or whether we tried and discarded it).
+Please address bug reports [here](mailto:bdwgc@lists.opendylan.org).
+If you are contemplating a major addition, you might also send mail to ask
+whether it's already been done (or whether we tried and discarded it).
+
 
 ## Copyright & Warranty
 

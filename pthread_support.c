@@ -274,7 +274,9 @@
 
 static GC_bool parallel_initialized = FALSE;
 
-GC_INNER GC_bool GC_need_to_lock = FALSE;
+#ifndef GC_ALWAYS_MULTITHREADED
+  GC_INNER GC_bool GC_need_to_lock = FALSE;
+#endif
 
 STATIC int GC_nprocs = 1;
                         /* Number of processors.  We may not have       */
@@ -1544,7 +1546,9 @@ GC_API void GC_CALL GC_allow_register_threads(void)
     /* Check GC is initialized and the current thread is registered. */
     GC_ASSERT(GC_lookup_thread(pthread_self()) != 0);
 
-    GC_need_to_lock = TRUE; /* We are multi-threaded now. */
+#   ifndef GC_ALWAYS_MULTITHREADED
+      GC_need_to_lock = TRUE;   /* We are multi-threaded now. */
+#   endif
 }
 
 GC_API int GC_CALL GC_register_my_thread(const struct GC_stack_base *sb)
@@ -1738,7 +1742,9 @@ GC_API int WRAP_FUNC(pthread_create)(pthread_t *new_thread,
       GC_log_printf("About to start new thread from thread %p\n",
                     (void *)pthread_self());
 #   endif
-    GC_need_to_lock = TRUE;
+#   ifndef GC_ALWAYS_MULTITHREADED
+      GC_need_to_lock = TRUE;
+#   endif
 
     result = REAL_FUNC(pthread_create)(new_thread, attr, GC_start_routine, si);
 
@@ -2048,5 +2054,13 @@ GC_INNER void GC_notify_all_marker(void)
 }
 
 #endif /* PARALLEL_MARK */
+
+#ifdef PTHREAD_REGISTER_CANCEL_WEAK_STUBS
+  /* Workaround "undefined reference" linkage errors on some targets. */
+  void __pthread_register_cancel() __attribute__((__weak__));
+  void __pthread_unregister_cancel() __attribute__((__weak__));
+  void __pthread_register_cancel() {}
+  void __pthread_unregister_cancel() {}
+#endif
 
 #endif /* GC_PTHREADS */

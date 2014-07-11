@@ -55,6 +55,19 @@
 #   define LINUX
 # endif
 
+/* And one for QNX: */
+# if defined(__QNX__)
+#    define I386
+#    define OS_TYPE "QNX"
+#    define SA_RESTART 0
+#    define HEURISTIC1
+     extern char etext[];
+#    define DATASTART ((ptr_t)(etext))
+     extern int _end[];
+#    define DATAEND (_end)
+#    define mach_type_known
+# endif
+
 /* And one for NetBSD: */
 # if defined(__NetBSD__)
 #    define NETBSD
@@ -91,9 +104,9 @@
 # endif
 # if defined(__arm) || defined(__arm__) || defined(__thumb__)
 #    define ARM32
-#    if !defined(LINUX) && !defined(NETBSD) && !defined(OPENBSD) \
-        && !defined(DARWIN) && !defined(_WIN32) && !defined(__CEGCC__) \
-        && !defined(SYMBIAN)
+#    if !defined(LINUX) && !defined(NETBSD) && !defined(FREEBSD) \
+        && !defined(OPENBSD) && !defined(DARWIN) \
+        && !defined(_WIN32) && !defined(__CEGCC__) && !defined(SYMBIAN)
 #      define NOSYS
 #      define mach_type_known
 #    endif
@@ -309,10 +322,6 @@
 #    define M32R
 #    define mach_type_known
 # endif
-# if defined(FREEBSD) && (defined(powerpc) || defined(__powerpc__))
-#    define POWERPC
-#    define mach_type_known
-# endif
 # if defined(__alpha) || defined(__alpha__)
 #   define ALPHA
 #   if !defined(LINUX) && !defined(NETBSD) && !defined(OPENBSD) \
@@ -381,14 +390,6 @@
 #   define OPENBSD
 #   define mach_type_known
 # endif
-# if defined(FREEBSD) && (defined(i386) || defined(__i386__))
-#   define I386
-#   define mach_type_known
-# endif
-# if defined(FREEBSD) && defined(__x86_64__)
-#   define X86_64
-#   define mach_type_known
-# endif
 # if defined(__NetBSD__) && (defined(i386) || defined(__i386__))
 #   define I386
 #   define mach_type_known
@@ -397,9 +398,29 @@
 #    define X86_64
 #    define mach_type_known
 # endif
+# if defined(FREEBSD) && (defined(i386) || defined(__i386__))
+#   define I386
+#   define mach_type_known
+# endif
+# if defined(FREEBSD) && (defined(__amd64__) || defined(__x86_64__))
+#   define X86_64
+#   define mach_type_known
+# endif
+# if defined(FREEBSD) && defined(__ia64__)
+#   define IA64
+#   define mach_type_known
+# endif
 # if defined(FREEBSD) && defined(__sparc__)
-#    define SPARC
-#    define mach_type_known
+#   define SPARC
+#   define mach_type_known
+# endif
+# if defined(FREEBSD) && (defined(powerpc) || defined(__powerpc__))
+#   define POWERPC
+#   define mach_type_known
+# endif
+# if defined(FREEBSD) && defined(__arm__)
+#   define ARM32
+#   define mach_type_known
 # endif
 # if defined(bsdi) && (defined(i386) || defined(__i386__))
 #    define I386
@@ -460,7 +481,11 @@
 #   define mach_type_known
 # endif
 # if defined(__CYGWIN32__) || defined(__CYGWIN__)
-#   define I386
+#   if defined(__LP64__)
+#     define X86_64
+#   else
+#     define I386
+#   endif
 #   define CYGWIN32
 #   define mach_type_known
 # endif
@@ -696,7 +721,7 @@
  * defined GC_register_dynamic_libraries() for the architecture.
  *
  * An architecture may define PREFETCH(x) to preload the cache with *x.
- * This defaults to a no-op.
+ * This defaults to GCC built-in operation (or a no-op for other compilers).
  *
  * PREFETCH_FOR_WRITE(x) is used if *x is about to be written.
  *
@@ -713,6 +738,7 @@
 # if defined(__GNUC__) && ((__GNUC__ >= 3) \
                            || (__GNUC__ == 2 && __GNUC_MINOR__ >= 8)) \
      && !defined(__INTEL_COMPILER) && !defined(__PATHCC__) \
+     && !defined(__FUJITSU) /* for FX10 system */ \
      && !(defined(POWERPC) && defined(DARWIN)) /* for MacOS X 10.3.9 */ \
      && !defined(RTEMS) \
      && !defined(__clang__) /* since no-op in clang (3.0) */
@@ -839,7 +865,14 @@
 #     define OS_TYPE "LINUX"
       /* HEURISTIC1 has been reliably reported to fail for a 32-bit     */
       /* executable on a 64 bit kernel.                                 */
-#     define LINUX_STACKBOTTOM
+#     if defined(__bg__)
+        /* The Linux Compute Node Kernel (used on BlueGene systems)     */
+        /* does not support LINUX_STACKBOTTOM way.                      */
+#       define HEURISTIC2
+#       define NO_PTHREAD_GETATTR_NP
+#     else
+#       define LINUX_STACKBOTTOM
+#     endif
 #     define DYNAMIC_LOADING
 #     define SEARCH_FOR_DATA_START
       extern int _end[];
@@ -1304,8 +1337,6 @@
 #            define DATASTART ((ptr_t)((((word) (etext)) + 0xfff) & ~0xfff))
 #       endif
 #       ifdef USE_I686_PREFETCH
-          /* FIXME: Thus should use __builtin_prefetch, but we'll leave */
-          /* that for the next release.                                 */
 #         define PREFETCH(x) \
             __asm__ __volatile__ ("prefetchnta %0" : : "m"(*(char *)(x)))
             /* Empirically prefetcht0 is much more effective at reducing     */
@@ -1317,9 +1348,10 @@
             /* impact on performance, at least for a PIII/500.               */
 #           define PREFETCH_FOR_WRITE(x) \
               __asm__ __volatile__ ("prefetcht0 %0" : : "m"(*(char *)(x)))
+#         else
+#           define NO_PREFETCH_FOR_WRITE
 #         endif
-#       endif
-#       ifdef USE_3DNOW_PREFETCH
+#       elif defined(USE_3DNOW_PREFETCH)
 #         define PREFETCH(x) \
             __asm__ __volatile__ ("prefetch %0" : : "m"(*(char *)(x)))
 #         define PREFETCH_FOR_WRITE(x) \
@@ -1829,11 +1861,7 @@
         /* This does not work on NUE:                           */
 #       define LINUX_STACKBOTTOM
         /* We also need the base address of the register stack  */
-        /* backing store.  This is computed in                  */
-        /* GC_linux_register_stack_base based on the following  */
-        /* constants:                                           */
-#       define BACKING_STORE_ALIGNMENT 0x100000
-#       define BACKING_STORE_DISPLACEMENT 0x80000000
+        /* backing store.                                       */
         extern ptr_t GC_register_stackbottom;
 #       define BACKING_STORE_BASE GC_register_stackbottom
 #       define SEARCH_FOR_DATA_START
@@ -1858,13 +1886,21 @@
               __asm__ ("        stf.spill       [%0]=f0": : "r"((void *)(x)))
 #         else
 #           include <ia64intrin.h>
-#           define PREFETCH(x) \
-              __lfetch(__lfhint_none, (x))
-#           define PREFETCH_FOR_WRITE(x) \
-              __lfetch(__lfhint_nta,  (x))
-#           define CLEAR_DOUBLE(x) \
-              __stf_spill((void *)(x), 0)
+#           define PREFETCH(x) __lfetch(__lfhint_none, (x))
+#           define PREFETCH_FOR_WRITE(x) __lfetch(__lfhint_nta, (x))
+#           define CLEAR_DOUBLE(x) __stf_spill((void *)(x), 0)
 #         endif /* __INTEL_COMPILER */
+#       endif
+#   endif
+#   ifdef CYGWIN32
+#       define OS_TYPE "CYGWIN32"
+#       define DATASTART ((ptr_t)GC_DATASTART)  /* From gc.h */
+#       define DATAEND   ((ptr_t)GC_DATAEND)
+#       undef STACK_GRAN
+#       define STACK_GRAN 0x10000
+#       ifdef USE_MMAP
+#         define NEED_FIND_LIMIT
+#         define USE_MMAP_ANON
 #       endif
 #   endif
 #   ifdef MSWIN32
@@ -1933,12 +1969,12 @@
 #       define OS_TYPE "LINUX"
 #       define LINUX_STACKBOTTOM
 #       define DYNAMIC_LOADING
-        extern int __data_start[];
+        extern int __data_start[] __attribute__((__weak__));
 #       define DATASTART ((ptr_t)(__data_start))
-    extern int _end[];
-#   define DATAEND (ptr_t)(_end)
-#   define CACHE_LINE_SIZE 256
-#   define GETPAGESIZE() 4096
+        extern int _end[] __attribute__((__weak__));
+#       define DATAEND (ptr_t)(_end)
+#       define CACHE_LINE_SIZE 256
+#       define GETPAGESIZE() 4096
 #   endif
 # endif
 
@@ -2016,6 +2052,17 @@
 #   ifdef MSWINCE
 #     define OS_TYPE "MSWINCE"
 #     define DATAEND /* not needed */
+#   endif
+#   ifdef FREEBSD
+      /* FreeBSD/arm */
+#     define ALIGNMENT 4
+#     define OS_TYPE "FREEBSD"
+#     ifdef __ELF__
+#       define DYNAMIC_LOADING
+#     endif
+#     define HEURISTIC2
+      extern char etext[];
+#     define SEARCH_FOR_DATA_START
 #   endif
 #   ifdef DARWIN
       /* iPhone */
@@ -2199,11 +2246,7 @@
              extern int etext[];
 #            define DATASTART ((ptr_t)((((word) (etext)) + 0xfff) & ~0xfff))
 #       endif
-#       if defined(__GNUC__) && __GNUC__ >= 3
-#           define PREFETCH(x) __builtin_prefetch((x), 0, 0)
-#           define PREFETCH_FOR_WRITE(x) __builtin_prefetch((x), 1)
-#       endif
-#       if defined(__GLIBC__)
+#       if defined(__GLIBC__) && !defined(__UCLIBC__)
           /* At present, there's a bug in GLibc getcontext() on         */
           /* Linux/x64 (it clears FPU exception mask).  We define this  */
           /* macro to workaround it.                                    */
@@ -2526,6 +2569,11 @@
 # undef USE_MMAP
 #endif
 
+#if defined(LINUX) || defined(FREEBSD) || defined(SOLARIS) || defined(IRIX5) \
+    || ((defined(USE_MMAP) || defined(USE_MUNMAP)) && !defined(USE_WINALLOC))
+# define MMAP_SUPPORTED
+#endif
+
 #if defined(GC_DISABLE_INCREMENTAL) || defined(MANUAL_VDB)
 # undef GWW_VDB
 # undef MPROTECT_VDB
@@ -2577,13 +2625,19 @@
 #endif
 
 #ifndef PREFETCH
-# define PREFETCH(x) (void)0
-# define NO_PREFETCH
+# if defined(__GNUC__) && __GNUC__ >= 3 && !defined(NO_PREFETCH)
+#   define PREFETCH(x) __builtin_prefetch((x), 0, 0)
+# else
+#   define PREFETCH(x) (void)0
+# endif
 #endif
 
 #ifndef PREFETCH_FOR_WRITE
-# define PREFETCH_FOR_WRITE(x) (void)0
-# define NO_PREFETCH_FOR_WRITE
+# if defined(__GNUC__) && __GNUC__ >= 3 && !defined(NO_PREFETCH_FOR_WRITE)
+#   define PREFETCH_FOR_WRITE(x) __builtin_prefetch((x), 1)
+# else
+#   define PREFETCH_FOR_WRITE(x) (void)0
+# endif
 #endif
 
 #ifndef CACHE_LINE_SIZE
@@ -2795,6 +2849,13 @@
 # define NEED_CALLINFO
 #endif
 
+#if (defined(FREEBSD) || (defined(DARWIN) && !defined(_POSIX_C_SOURCE)) \
+        || (defined(SOLARIS) && (!defined(_XOPEN_SOURCE) \
+                                 || defined(__EXTENSIONS__))) \
+        || defined(LINUX)) && !defined(HAVE_DLADDR)
+# define HAVE_DLADDR
+#endif
+
 #if defined(MAKE_BACK_GRAPH) && !defined(DBG_HDRS_ALL)
 # define DBG_HDRS_ALL
 #endif
@@ -2849,8 +2910,8 @@
         /* REDIRECT_MALLOC macro defined.                               */
         /* GET_MEM() returns a HLKSIZE aligned chunk.                   */
         /* 0 is taken to mean failure.                                  */
-        /* In the case os USE_MMAP, the argument must also be a         */
-        /* physical page size.                                          */
+        /* In case of MMAP_SUPPORTED, the argument must also be         */
+        /* a multiple of a physical page size.                          */
         /* GET_MEM is currently not assumed to retrieve 0 filled space, */
         /* though we should perhaps take advantage of the case in which */
         /* does.                                                        */

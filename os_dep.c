@@ -98,11 +98,6 @@
 # include <malloc.h>   /* for locking */
 #endif
 
-#if defined(LINUX) || defined(FREEBSD) || defined(SOLARIS) || defined(IRIX5) \
-    || ((defined(USE_MMAP) || defined(USE_MUNMAP)) && !defined(USE_WINALLOC))
-# define MMAP_SUPPORTED
-#endif
-
 #if defined(MMAP_SUPPORTED) || defined(ADD_HEAP_GUARD_PAGES)
 # if defined(USE_MUNMAP) && !defined(USE_MMAP)
 #   error "invalid config - USE_MUNMAP requires USE_MMAP"
@@ -304,30 +299,29 @@ GC_INNER char * GC_get_maps(void)
                                     char **prot, unsigned int *maj_dev,
                                     char **mapping_name)
   {
-    char *start_start, *end_start, *maj_dev_start;
-    char *p;
-    char *endp;
+    unsigned char *start_start, *end_start, *maj_dev_start;
+    unsigned char *p;   /* unsigned for isspace, isxdigit */
 
     if (buf_ptr == NULL || *buf_ptr == '\0') {
         return NULL;
     }
 
-    p = buf_ptr;
+    p = (unsigned char *)buf_ptr;
     while (isspace(*p)) ++p;
     start_start = p;
     GC_ASSERT(isxdigit(*start_start));
-    *start = (ptr_t)strtoul(start_start, &endp, 16); p = endp;
+    *start = (ptr_t)strtoul((char *)start_start, (char **)&p, 16);
     GC_ASSERT(*p=='-');
 
     ++p;
     end_start = p;
     GC_ASSERT(isxdigit(*end_start));
-    *end = (ptr_t)strtoul(end_start, &endp, 16); p = endp;
+    *end = (ptr_t)strtoul((char *)end_start, (char **)&p, 16);
     GC_ASSERT(isspace(*p));
 
     while (isspace(*p)) ++p;
     GC_ASSERT(*p == 'r' || *p == '-');
-    *prot = p;
+    *prot = (char *)p;
     /* Skip past protection field to offset field */
        while (!isspace(*p)) ++p; while (isspace(*p)) ++p;
     GC_ASSERT(isxdigit(*p));
@@ -335,16 +329,16 @@ GC_INNER char * GC_get_maps(void)
           while (!isspace(*p)) ++p; while (isspace(*p)) ++p;
     maj_dev_start = p;
     GC_ASSERT(isxdigit(*maj_dev_start));
-    *maj_dev = strtoul(maj_dev_start, NULL, 16);
+    *maj_dev = strtoul((char *)maj_dev_start, NULL, 16);
 
     if (mapping_name == 0) {
       while (*p && *p++ != '\n');
     } else {
       while (*p && *p != '\n' && *p != '/' && *p != '[') p++;
-      *mapping_name = p;
+      *mapping_name = (char *)p;
       while (*p && *p++ != '\n');
     }
-    return p;
+    return (char *)p;
   }
 #endif /* REDIRECT_MALLOC || DYNAMIC_LOADING || IA64 || ... */
 
@@ -441,11 +435,15 @@ GC_INNER char * GC_get_maps(void)
     /* define data_start as a weak symbol.  The latter is technically   */
     /* broken, since the user program may define data_start, in which   */
     /* case we lose.  Nonetheless, we try both, preferring __data_start.*/
-    /* We assume gcc-compatible pragmas.        */
+    /* We assume gcc-compatible pragmas.                                */
 #   pragma weak __data_start
-    extern int __data_start[];
 #   pragma weak data_start
-    extern int data_start[];
+    extern int __data_start[], data_start[];
+#   ifdef PLATFORM_ANDROID
+#     pragma weak _etext
+#     pragma weak __dso_handle
+      extern int _etext[], __dso_handle[];
+#   endif
 # endif /* LINUX */
   extern int _end[];
 
@@ -457,6 +455,19 @@ GC_INNER char * GC_get_maps(void)
   {
 #   if (defined(LINUX) || defined(HURD)) && !defined(IGNORE_PROG_DATA_START)
       /* Try the easy approaches first: */
+#     ifdef PLATFORM_ANDROID
+        /* Workaround for "gold" (default) linker (as of Android NDK r9b).      */
+        if ((word)__data_start < (word)_etext
+            && (word)_etext < (word)__dso_handle) {
+          GC_data_start = (ptr_t)(__dso_handle);
+#         ifdef DEBUG_ADD_DEL_ROOTS
+            GC_log_printf(
+                "__data_start is wrong; using __dso_handle as data start\n");
+#         endif
+          GC_ASSERT((word)GC_data_start <= (word)_end);
+          return;
+        }
+#     endif
       if ((ptr_t)__data_start != 0) {
           GC_data_start = (ptr_t)(__data_start);
           GC_ASSERT((word)GC_data_start <= (word)_end);
@@ -783,11 +794,15 @@ GC_INNER word GC_page_size = 0;
     /* gcc version of boehm-gc).                                        */
     GC_API int GC_CALL GC_get_stack_base(struct GC_stack_base *sb)
     {
-      void * _tlsbase;
+#     ifdef X86_64
+        sb -> mem_base = ((NT_TIB*)NtCurrentTeb())->StackBase;
+#     else
+        void * _tlsbase;
 
-      __asm__ ("movl %%fs:4, %0"
-               : "=r" (_tlsbase));
-      sb -> mem_base = _tlsbase;
+        __asm__ ("movl %%fs:4, %0"
+                 : "=r" (_tlsbase));
+        sb -> mem_base = _tlsbase;
+#     endif
       return GC_SUCCESS;
     }
 # endif /* CYGWIN32 */
@@ -844,10 +859,10 @@ GC_INNER word GC_page_size = 0;
     typedef void (*GC_fault_handler_t)(int);
 
 #   if defined(SUNOS5SIGS) || defined(IRIX5) || defined(OSF1) \
-       || defined(HURD) || defined(NETBSD)
+       || defined(HURD) || defined(FREEBSD) || defined(NETBSD)
         static struct sigaction old_segv_act;
 #       if defined(_sigargs) /* !Irix6.x */ \
-           || defined(HURD) || defined(NETBSD)
+           || defined(HURD) || defined(NETBSD) || defined(FREEBSD)
             static struct sigaction old_bus_act;
 #       endif
 #   else
@@ -859,8 +874,8 @@ GC_INNER word GC_page_size = 0;
 
     GC_INNER void GC_set_and_save_fault_handler(GC_fault_handler_t h)
     {
-#       if defined(SUNOS5SIGS) || defined(IRIX5) \
-           || defined(OSF1) || defined(HURD) || defined(NETBSD)
+#       if defined(SUNOS5SIGS) || defined(IRIX5) || defined(OSF1) \
+            || defined(HURD) || defined(FREEBSD) || defined(NETBSD)
           struct sigaction act;
 
           act.sa_handler = h;
@@ -882,13 +897,13 @@ GC_INNER word GC_page_size = 0;
 #         else
             (void) sigaction(SIGSEGV, &act, &old_segv_act);
 #           if defined(IRIX5) && defined(_sigargs) /* Irix 5.x, not 6.x */ \
-               || defined(HURD) || defined(NETBSD)
+               || defined(HURD) || defined(NETBSD) || defined(FREEBSD)
               /* Under Irix 5.x or HP/UX, we may get SIGBUS.    */
               /* Pthreads doesn't exist under Irix 5.x, so we   */
               /* don't have to worry in the threads case.       */
               (void) sigaction(SIGBUS, &act, &old_bus_act);
 #           endif
-#         endif /* GC_IRIX_THREADS */
+#         endif /* !GC_IRIX_THREADS */
 #       else
           old_segv_handler = signal(SIGSEGV, h);
 #         ifdef SIGBUS
@@ -918,8 +933,8 @@ GC_INNER word GC_page_size = 0;
 
     GC_INNER void GC_reset_fault_handler(void)
     {
-#       if defined(SUNOS5SIGS) || defined(IRIX5) \
-           || defined(OSF1) || defined(HURD) || defined(NETBSD)
+#       if defined(SUNOS5SIGS) || defined(IRIX5) || defined(OSF1) \
+           || defined(HURD) || defined(FREEBSD) || defined(NETBSD)
           (void) sigaction(SIGSEGV, &old_segv_act, 0);
 #         if defined(IRIX5) && defined(_sigargs) /* Irix 5.x, not 6.x */ \
              || defined(HURD) || defined(NETBSD)
@@ -1522,6 +1537,7 @@ void GC_register_data_segments(void)
       GC_add_roots_inner((ptr_t)O32_BASE(seg),
                          (ptr_t)(O32_BASE(seg)+O32_SIZE(seg)), FALSE);
     }
+    (void)fclose(myexefile);
 }
 
 # else /* !OS2 */
@@ -2052,8 +2068,7 @@ STATIC ptr_t GC_unix_mmap_get_mem(word bytes)
 #   undef IGNORE_PAGES_EXECUTABLE
 
     if (result == MAP_FAILED) return(0);
-    last_addr = (ptr_t)result + bytes + GC_page_size - 1;
-    last_addr = (ptr_t)((word)last_addr & ~(GC_page_size - 1));
+    last_addr = (ptr_t)ROUNDUP_PAGESIZE((word)result + bytes);
 #   if !defined(LINUX)
       if (last_addr == 0) {
         /* Oops.  We got the end of the address space.  This isn't      */
@@ -2173,8 +2188,7 @@ void * os2_alloc(size_t bytes)
     ptr_t result = 0; /* initialized to prevent warning. */
     word i;
 
-    /* Round up allocation size to multiple of page size */
-    bytes = (bytes + GC_page_size-1) & ~(GC_page_size-1);
+    bytes = ROUNDUP_PAGESIZE(bytes);
 
     /* Try to find reserved, uncommitted pages */
     for (i = 0; i < GC_n_heap_bases; i++) {
@@ -2349,9 +2363,8 @@ void * os2_alloc(size_t bytes)
 /* Return 0 if the block is too small to make this feasible.    */
 STATIC ptr_t GC_unmap_start(ptr_t start, size_t bytes)
 {
-    ptr_t result;
-    /* Round start to next page boundary.       */
-    result = (ptr_t)((word)(start + GC_page_size - 1) & ~(GC_page_size - 1));
+    ptr_t result = (ptr_t)ROUNDUP_PAGESIZE((word)start);
+
     if ((word)(result + GC_page_size) > (word)(start + bytes)) return 0;
     return result;
 }
@@ -3073,8 +3086,15 @@ GC_API GC_push_other_roots_proc GC_CALL GC_get_push_other_roots(void)
 #     ifndef SEGV_ACCERR
 #       define SEGV_ACCERR 2
 #     endif
-#     define CODE_OK (si -> si_code == BUS_PAGE_FAULT \
-          || si -> si_code == SEGV_ACCERR)
+#     if defined(POWERPC)
+#       define AIM  /* Pretend that we're AIM. */
+#       include <machine/trap.h>
+#       define CODE_OK (si -> si_code == EXC_DSI \
+                        || si -> si_code == SEGV_ACCERR)
+#     else
+#       define CODE_OK (si -> si_code == BUS_PAGE_FAULT \
+                        || si -> si_code == SEGV_ACCERR)
+#     endif
 #   elif defined(OSF1)
 #     define CODE_OK (si -> si_code == 2 /* experimentally determined */)
 #   elif defined(IRIX5)
@@ -3245,8 +3265,7 @@ GC_INNER void GC_remove_protection(struct hblk *h, word nblocks,
 #   endif
     if (!GC_dirty_maintained) return;
     h_trunc = (struct hblk *)((word)h & ~(GC_page_size-1));
-    h_end = (struct hblk *)(((word)(h + nblocks) + GC_page_size-1)
-                            & ~(GC_page_size-1));
+    h_end = (struct hblk *)ROUNDUP_PAGESIZE((word)(h + nblocks));
     if (h_end == h_trunc + 1 &&
         get_pht_entry_from_index(GC_dirty_pages, PHT_HASH(h_trunc))) {
         /* already marked dirty, and hence unprotected. */
@@ -4565,8 +4584,10 @@ GC_INNER void GC_save_callers(struct callinfo info[NFRAMES])
    for (; !((word)fp HOTTER_THAN (word)frame)
           && !((word)GC_stackbottom HOTTER_THAN (word)fp)
           && nframes < NFRAMES;
-       fp = (struct frame *)((long) fp -> FR_SAVFP + BIAS), nframes++) {
-      register int i;
+        fp = (struct frame *)((long) fp -> FR_SAVFP + BIAS), nframes++) {
+#     if NARGS > 0
+        register int i;
+#     endif
 
       info[nframes].ci_pc = fp->FR_SAVPC;
 #     if NARGS > 0
