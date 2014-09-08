@@ -181,6 +181,10 @@
 #    endif
 #    define mach_type_known
 # endif
+# if defined(__or1k__)
+#    define OR1K        /* OpenRISC/or1k */
+#    define mach_type_known
+# endif
 # if defined(DGUX) && (defined(i386) || defined(__i386__))
 #    define I386
 #    ifndef _USING_DGUX
@@ -1672,6 +1676,24 @@
 #   endif
 # endif
 
+# ifdef OR1K
+#   define CPP_WORDSZ 32
+#   define MACH_TYPE "OR1K"
+#   ifdef LINUX
+#     define OS_TYPE "LINUX"
+#     define DYNAMIC_LOADING
+      extern int _end[];
+#     define DATAEND (ptr_t)(_end)
+      extern int __data_start[];
+#     define DATASTART ((ptr_t)(__data_start))
+#     define ALIGNMENT 4
+#     ifndef HBLKSIZE
+#       define HBLKSIZE 4096
+#     endif
+#     define LINUX_STACKBOTTOM
+#   endif /* Linux */
+# endif
+
 # ifdef HP_PA
 #   define MACH_TYPE "HP_PA"
 #   ifdef __LP64__
@@ -2631,7 +2653,8 @@
 
 #if ((defined(UNIX_LIKE) && (defined(DARWIN) || defined(HURD) \
                              || defined(OPENBSD) || defined(ARM32) \
-                             || defined(MIPS) || defined(AVR32))) \
+                             || defined(MIPS) || defined(AVR32) \
+                             || defined(OR1K))) \
      || (defined(LINUX) && (defined(SPARC) || defined(M68K))) \
      || ((defined(RTEMS) || defined(PLATFORM_ANDROID)) && defined(I386))) \
     && !defined(NO_GETCONTEXT)

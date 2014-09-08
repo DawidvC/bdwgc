@@ -618,7 +618,12 @@ GC_API int GC_CALL GC_thread_is_registered(void)
 #ifdef CYGWIN32
 # define GC_PTHREAD_PTRVAL(pthread_id) pthread_id
 #elif defined(GC_WIN32_PTHREADS) || defined(GC_PTHREADS_PARAMARK)
-# define GC_PTHREAD_PTRVAL(pthread_id) pthread_id.p
+# include <pthread.h> /* to check for winpthreads */
+# if defined(__WINPTHREADS_VERSION_MAJOR)
+#   define GC_PTHREAD_PTRVAL(pthread_id) pthread_id
+# else
+#   define GC_PTHREAD_PTRVAL(pthread_id) pthread_id.p
+# endif
 #endif
 
 /* If a thread has been joined, but we have not yet             */
@@ -1733,6 +1738,7 @@ GC_INNER void GC_get_next_stack(char *start, char *limit,
 
 #   ifndef NUMERIC_THREAD_ID
 #     define NUMERIC_THREAD_ID(id) (unsigned long)GC_PTHREAD_PTRVAL(id)
+      /* Id not guaranteed to be unique. */
 #   endif
 
     /* start_mark_threads is the same as in pthread_support.c except    */
@@ -1800,7 +1806,9 @@ GC_INNER void GC_get_next_stack(char *start, char *limit,
 
     GC_INNER void GC_acquire_mark_lock(void)
     {
-      GC_ASSERT(GC_mark_lock_holder != NUMERIC_THREAD_ID(pthread_self()));
+#     ifdef NUMERIC_THREAD_ID_UNIQUE
+        GC_ASSERT(GC_mark_lock_holder != NUMERIC_THREAD_ID(pthread_self()));
+#     endif
       if (pthread_mutex_lock(&mark_mutex) != 0) {
         ABORT("pthread_mutex_lock failed");
       }
@@ -2463,15 +2471,14 @@ GC_INNER void GC_thr_init(void)
 #   ifndef GC_WIN32_PTHREADS
       while ((t = GC_lookup_pthread(pthread_id)) == 0)
         Sleep(10);
-#   endif
-
-    result = pthread_join(pthread_id, retval);
-
-#   ifdef GC_WIN32_PTHREADS
-      /* win32_pthreads id are unique */
+      result = pthread_join(pthread_id, retval);
+#   else
+      result = pthread_join(pthread_id, retval);
+      /* pthreads-win32 and winpthreads id are unique (not recycled). */
       t = GC_lookup_pthread(pthread_id);
       if (NULL == t) ABORT("Thread not registered");
 #   endif
+
     LOCK();
     GC_delete_gc_thread_no_free(t);
     GC_INTERNAL_FREE(t);
